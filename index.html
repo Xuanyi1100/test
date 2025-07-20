@@ -31,10 +31,11 @@
       const [motionStatus, setMotionStatus] = useState('待机');
       const [permission, setPermission] = useState('未知');
       const [needsPermission, setNeedsPermission] = useState(false);
-      const [debugInfo, setDebugInfo] = useState({});
+      const [allSensorData, setAllSensorData] = useState(null);
+      const [eventCount, setEventCount] = useState(0);
       const lastAcceleration = useRef({ x: 0, y: 0, z: 0 });
-      const motionThreshold = 0.5; // 降低阈值
-      const stillThreshold = 0.1; // 降低阈值
+      const motionThreshold = 0.5;
+      const stillThreshold = 0.1;
       const motionHistory = useRef([]);
 
       // 检查是否需要权限请求
@@ -91,47 +92,67 @@
       };
 
       const handleMotion = e => {
+        setEventCount(prev => prev + 1);
+        
+        // 收集所有可能的数据
+        const sensorData = {
+          timestamp: new Date().toISOString().split('T')[1].split('.')[0],
+          eventReceived: true,
+          interval: e.interval,
+          // 加速度数据（不包含重力）
+          acceleration: e.acceleration ? {
+            x: e.acceleration.x,
+            y: e.acceleration.y,
+            z: e.acceleration.z
+          } : null,
+          // 包含重力的加速度数据
+          accelerationIncludingGravity: e.accelerationIncludingGravity ? {
+            x: e.accelerationIncludingGravity.x,
+            y: e.accelerationIncludingGravity.y,
+            z: e.accelerationIncludingGravity.z
+          } : null,
+          // 旋转率数据
+          rotationRate: e.rotationRate ? {
+            alpha: e.rotationRate.alpha,
+            beta: e.rotationRate.beta,
+            gamma: e.rotationRate.gamma
+          } : null
+        };
+        
+        setAllSensorData(sensorData);
+        
         if (!isActive) return;
         
-        // 获取所有可能的加速度数据
-        const acc = e.acceleration;
-        const accGrav = e.accelerationIncludingGravity;
-        const rotRate = e.rotationRate;
-        
-        // 尝试不同的数据源
-        let dataSource = acc;
+        // 尝试计算运动强度
+        let dataSource = e.acceleration;
         let sourceName = 'acceleration';
         
-        if (!acc || (acc.x === null && acc.y === null && acc.z === null)) {
-          dataSource = accGrav;
+        if (!dataSource || (dataSource.x === null && dataSource.y === null && dataSource.z === null)) {
+          dataSource = e.accelerationIncludingGravity;
           sourceName = 'accelerationIncludingGravity';
         }
         
         const inten = calculateMotionIntensity(dataSource);
         motionHistory.current.push(inten);
-        if (motionHistory.current.length > 15) { // 增加历史记录长度
+        if (motionHistory.current.length > 15) {
           motionHistory.current.shift();
         }
         const avg = motionHistory.current.reduce((a,b)=>a+b,0) / motionHistory.current.length;
         
-        // 更新调试信息
-        setDebugInfo({
-          dataSource: sourceName,
-          rawAcc: dataSource ? {
-            x: dataSource.x?.toFixed(3),
-            y: dataSource.y?.toFixed(3),
-            z: dataSource.z?.toFixed(3)
-          } : null,
-          intensity: inten.toFixed(3),
-          avgIntensity: avg.toFixed(3),
-          threshold: motionThreshold,
-          historyLength: motionHistory.current.length,
-          rotationRate: rotRate ? {
-            alpha: rotRate.alpha?.toFixed(2),
-            beta: rotRate.beta?.toFixed(2),
-            gamma: rotRate.gamma?.toFixed(2)
-          } : null
-        });
+        // 更新传感器数据中的计算结果
+        setAllSensorData(prev => ({
+          ...prev,
+          calculation: {
+            dataSource: sourceName,
+            intensity: inten,
+            avgIntensity: avg,
+            threshold: motionThreshold,
+            stillThreshold: stillThreshold,
+            historyLength: motionHistory.current.length,
+            willBeMoving: avg > motionThreshold,
+            willBeStop: avg < stillThreshold
+          }
+        }));
         
         if (avg > motionThreshold) setMotionStatus('Moving');
         else if (avg < stillThreshold) setMotionStatus('Stop');
@@ -141,11 +162,14 @@
       const startDetection = () => {
         setIsActive(true);
         setMotionStatus('准备中...');
+        setEventCount(0);
+        setAllSensorData(null);
         motionHistory.current = [];
+        lastAcceleration.current = { x: 0, y: 0, z: 0 };
         window.addEventListener('devicemotion', handleMotion);
         setTimeout(() => {
           setMotionStatus('Stop');
-        }, 3000);
+        }, 2000);
       };
 
       // 停止检测
@@ -241,28 +265,88 @@
               )}
             </div>
 
-            {/* 调试信息 */}
-            {isActive && debugInfo.rawAcc && (
-              <div className="mt-4 bg-green-50 rounded-lg p-3 text-xs text-green-800 font-mono">
-                <div className="font-bold mb-2">实时传感器数据:</div>
-                <div>数据源: {debugInfo.dataSource}</div>
-                <div>原始加速度: x={debugInfo.rawAcc.x}, y={debugInfo.rawAcc.y}, z={debugInfo.rawAcc.z}</div>
-                <div>运动强度: {debugInfo.intensity}</div>
-                <div>平均强度: {debugInfo.avgIntensity} (阈值: {debugInfo.threshold})</div>
-                <div>历史记录: {debugInfo.historyLength}条</div>
-                {debugInfo.rotationRate && (
-                  <div>旋转率: α={debugInfo.rotationRate.alpha}°, β={debugInfo.rotationRate.beta}°, γ={debugInfo.rotationRate.gamma}°</div>
-                )}
-              </div>
-            )}
+            {/* 完整传感器数据显示 */}
+            <div className="mt-4 bg-gray-50 rounded-lg p-3 text-xs">
+              <div className="font-bold mb-2 text-gray-800">传感器状态监控:</div>
+              <div className="text-gray-600">事件接收次数: <span className="font-mono text-blue-600">{eventCount}</span></div>
+              
+              {allSensorData ? (
+                <div className="mt-2 space-y-2">
+                  <div className="text-green-700">✓ 接收到传感器事件 ({allSensorData.timestamp})</div>
+                  <div>间隔: <span className="font-mono">{allSensorData.interval ? allSensorData.interval.toFixed(2) + 'ms' : 'null'}</span></div>
+                  
+                  {/* 加速度数据 */}
+                  <div className="border-l-2 border-blue-300 pl-2">
+                    <div className="font-semibold text-blue-700">acceleration (不含重力):</div>
+                    {allSensorData.acceleration ? (
+                      <div className="font-mono text-sm">
+                        x: {allSensorData.acceleration.x?.toFixed(4) || 'null'}<br/>
+                        y: {allSensorData.acceleration.y?.toFixed(4) || 'null'}<br/>
+                        z: {allSensorData.acceleration.z?.toFixed(4) || 'null'}
+                      </div>
+                    ) : (
+                      <div className="text-red-600">null</div>
+                    )}
+                  </div>
+                  
+                  {/* 包含重力的加速度数据 */}
+                  <div className="border-l-2 border-green-300 pl-2">
+                    <div className="font-semibold text-green-700">accelerationIncludingGravity:</div>
+                    {allSensorData.accelerationIncludingGravity ? (
+                      <div className="font-mono text-sm">
+                        x: {allSensorData.accelerationIncludingGravity.x?.toFixed(4) || 'null'}<br/>
+                        y: {allSensorData.accelerationIncludingGravity.y?.toFixed(4) || 'null'}<br/>
+                        z: {allSensorData.accelerationIncludingGravity.z?.toFixed(4) || 'null'}
+                      </div>
+                    ) : (
+                      <div className="text-red-600">null</div>
+                    )}
+                  </div>
+                  
+                  {/* 旋转率数据 */}
+                  <div className="border-l-2 border-purple-300 pl-2">
+                    <div className="font-semibold text-purple-700">rotationRate:</div>
+                    {allSensorData.rotationRate ? (
+                      <div className="font-mono text-sm">
+                        α: {allSensorData.rotationRate.alpha?.toFixed(4) || 'null'}<br/>
+                        β: {allSensorData.rotationRate.beta?.toFixed(4) || 'null'}<br/>
+                        γ: {allSensorData.rotationRate.gamma?.toFixed(4) || 'null'}
+                      </div>
+                    ) : (
+                      <div className="text-red-600">null</div>
+                    )}
+                  </div>
+                  
+                  {/* 计算结果 */}
+                  {allSensorData.calculation && isActive && (
+                    <div className="border-l-2 border-orange-300 pl-2">
+                      <div className="font-semibold text-orange-700">运动计算:</div>
+                      <div className="font-mono text-sm">
+                        数据源: {allSensorData.calculation.dataSource}<br/>
+                        瞬时强度: {allSensorData.calculation.intensity?.toFixed(4)}<br/>
+                        平均强度: {allSensorData.calculation.avgIntensity?.toFixed(4)}<br/>
+                        运动阈值: {allSensorData.calculation.threshold}<br/>
+                        静止阈值: {allSensorData.calculation.stillThreshold}<br/>
+                        历史记录: {allSensorData.calculation.historyLength}条<br/>
+                        <span className={allSensorData.calculation.willBeMoving ? 'text-green-600' : 'text-red-600'}>
+                          判断: {allSensorData.calculation.willBeMoving ? 'Moving' : 'Stop'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-red-600 mt-2">
+                  {isActive ? '等待传感器数据...' : '未启动检测'}
+                </div>
+              )}
+            </div>
 
             <div className="mt-4 bg-yellow-50 rounded-lg p-3 text-xs text-yellow-800">
-              <div>调试信息:</div>
+              <div>系统信息:</div>
               <div>• DeviceMotionEvent: {typeof DeviceMotionEvent !== 'undefined' ? '✓' : '✗'}</div>
               <div>• 权限API: {checkPermissionNeeded() ? '✓ (iOS)' : '✗ (Android/其他)'}</div>
               <div>• 当前权限: {permission}</div>
-              <div>• 运动阈值: {motionThreshold} (已降低)</div>
-              <div>• 静止阈值: {stillThreshold}</div>
             </div>
 
             <div className="mt-6 bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
