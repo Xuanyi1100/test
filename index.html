@@ -41,8 +41,8 @@
       // 使用 ref 来避免闭包问题
       const isActiveRef = useRef(false);
       const lastAcceleration = useRef({ x: 0, y: 0, z: 0 });
-      const motionThreshold = 0.5;
-      const stillThreshold = 0.1;
+      const motionThreshold = 0.3; // 降低阈值，提高敏感度
+      const stillThreshold = 0.08; // 降低静止阈值
       const motionHistory = useRef([]);
 
       // 同步 isActive 状态到 ref
@@ -168,32 +168,58 @@
           const inten = calculateMotionIntensity(dataSource);
           console.log('Calculated intensity result:', inten);
           
+          // 使用更短的历史记录，提高响应速度
           motionHistory.current.push(inten);
-          if (motionHistory.current.length > 15) {
+          if (motionHistory.current.length > 8) { // 从15减少到8
             motionHistory.current.shift();
           }
-          const avg = motionHistory.current.reduce((a,b)=>a+b,0) / motionHistory.current.length;
+          
+          // 计算加权平均，给最新的数据更大权重
+          let weightedSum = 0;
+          let weightTotal = 0;
+          for (let i = 0; i < motionHistory.current.length; i++) {
+            const weight = i + 1; // 最新的数据权重最大
+            weightedSum += motionHistory.current[i] * weight;
+            weightTotal += weight;
+          }
+          const weightedAvg = weightedSum / weightTotal;
+          
+          // 也计算简单平均作为参考
+          const simpleAvg = motionHistory.current.reduce((a,b)=>a+b,0) / motionHistory.current.length;
           
           console.log('Motion history length:', motionHistory.current.length);
-          console.log('Average intensity:', avg);
+          console.log('Simple average intensity:', simpleAvg);
+          console.log('Weighted average intensity:', weightedAvg);
           
           // 添加计算结果到传感器数据中
           sensorData.calculation = {
             dataSource: sourceName,
             intensity: inten,
-            avgIntensity: avg,
+            simpleAvg: simpleAvg,
+            weightedAvg: weightedAvg,
             threshold: motionThreshold,
             stillThreshold: stillThreshold,
             historyLength: motionHistory.current.length,
-            willBeMoving: avg > motionThreshold,
-            willBeStop: avg < stillThreshold
+            willBeMoving: weightedAvg > motionThreshold,
+            willBeStop: weightedAvg < stillThreshold
           };
           
           console.log('Added calculation to sensorData:', sensorData.calculation);
           
-          // 更新运动状态
-          if (avg > motionThreshold) setMotionStatus('Moving');
-          else if (avg < stillThreshold) setMotionStatus('Stop');
+          // 更新运动状态 - 使用加权平均和即时检测
+          // 如果瞬时强度很大，立即响应
+          if (inten > motionThreshold * 2) {
+            setMotionStatus('Moving');
+          } else if (inten < stillThreshold * 0.5) {
+            setMotionStatus('Stop');
+          } else {
+            // 使用加权平均做判断
+            if (weightedAvg > motionThreshold) {
+              setMotionStatus('Moving');
+            } else if (weightedAvg < stillThreshold) {
+              setMotionStatus('Stop');
+            }
+          }
         }
         
         setAllSensorData(sensorData);
@@ -210,7 +236,7 @@
         window.addEventListener('devicemotion', handleMotion);
         setTimeout(() => {
           setMotionStatus('Stop');
-        }, 2000);
+        }, 1000); // 从2秒减少到1秒
       }, [handleMotion]);
 
       // 停止检测
@@ -262,7 +288,7 @@
 
             <div className="bg-gray-50 rounded-xl p-6 mb-8 text-center">
               <div className="text-sm text-gray-500 mb-2">当前状态</div>
-              <div className={`text-3xl font-bold ${
+              <div className={`text-3xl font-bold transition-colors duration-150 ${
                 motionStatus === 'Moving' ? 'text-green-600' :
                 motionStatus === 'Stop' ? 'text-red-600' :
                 'text-gray-600'
@@ -270,7 +296,7 @@
                 {motionStatus}
               </div>
               <div className="mt-4 flex justify-center">
-                <div className={`w-4 h-4 rounded-full ${
+                <div className={`w-4 h-4 rounded-full transition-all duration-150 ${
                   isActive ?
                     (motionStatus === 'Moving' ? 'bg-green-500 animate-pulse' :
                      motionStatus === 'Stop'   ? 'bg-red-500' :
@@ -365,7 +391,8 @@
                       <div className="font-mono text-sm">
                         数据源: {allSensorData.calculation.dataSource}<br/>
                         瞬时强度: {allSensorData.calculation.intensity?.toFixed(4)}<br/>
-                        平均强度: {allSensorData.calculation.avgIntensity?.toFixed(4)}<br/>
+                        简单平均: {allSensorData.calculation.simpleAvg?.toFixed(4)}<br/>
+                        加权平均: {allSensorData.calculation.weightedAvg?.toFixed(4)}<br/>
                         运动阈值: {allSensorData.calculation.threshold}<br/>
                         静止阈值: {allSensorData.calculation.stillThreshold}<br/>
                         历史记录: {allSensorData.calculation.historyLength}条<br/>
@@ -404,6 +431,7 @@
               <p>• 行走时显示 "Moving"</p>
               <p>• 静止时显示 "Stop"</p>
               <p>• 如果权限被拒绝，请在Safari设置中重新允许</p>
+              <p>• 现已优化响应速度，应该更快响应运动变化</p>
             </div>
           </div>
         </div>
