@@ -28,7 +28,7 @@
 
   <!-- 你的组件代码，注意去掉 import/export -->
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useCallback } = React;
 
     function MotionDetector() {
       const [isActive, setIsActive] = useState(false);
@@ -37,10 +37,18 @@
       const [needsPermission, setNeedsPermission] = useState(false);
       const [allSensorData, setAllSensorData] = useState(null);
       const [eventCount, setEventCount] = useState(0);
+      
+      // 使用 ref 来避免闭包问题
+      const isActiveRef = useRef(false);
       const lastAcceleration = useRef({ x: 0, y: 0, z: 0 });
       const motionThreshold = 0.5;
       const stillThreshold = 0.1;
       const motionHistory = useRef([]);
+
+      // 同步 isActive 状态到 ref
+      useEffect(() => {
+        isActiveRef.current = isActive;
+      }, [isActive]);
 
       // 检查是否需要权限请求
       const checkPermissionNeeded = () => {
@@ -69,7 +77,7 @@
         }
       };
 
-      const calculateMotionIntensity = acc => {
+      const calculateMotionIntensity = (acc) => {
         console.log('calculateMotionIntensity called with:', acc);
         
         if (!acc || (acc.x == null && acc.y == null && acc.z == null)) {
@@ -106,8 +114,10 @@
         return intensity;
       };
 
-      const handleMotion = e => {
-        console.log('handleMotion called, isActive:', isActive);
+      // 使用 useCallback 并依赖于 ref 来避免闭包问题
+      const handleMotion = useCallback((e) => {
+        const currentIsActive = isActiveRef.current;
+        console.log('handleMotion called, isActive:', currentIsActive);
         setEventCount(prev => prev + 1);
         
         // 收集所有可能的数据 - 无论是否 active 都收集
@@ -138,7 +148,7 @@
         console.log('Sensor data collected:', sensorData);
         
         // 只有在 isActive 时才进行运动计算和状态更新
-        if (isActive) {
+        if (currentIsActive) {
           console.log('Starting motion calculation...');
           
           // 尝试计算运动强度
@@ -187,10 +197,10 @@
         }
         
         setAllSensorData(sensorData);
-      };
+      }, []); // 空依赖数组，因为我们使用了 ref
 
       // 启动检测
-      const startDetection = () => {
+      const startDetection = useCallback(() => {
         setIsActive(true);
         setMotionStatus('准备中...');
         setEventCount(0);
@@ -201,14 +211,14 @@
         setTimeout(() => {
           setMotionStatus('Stop');
         }, 2000);
-      };
+      }, [handleMotion]);
 
       // 停止检测
-      const stopDetection = () => {
+      const stopDetection = useCallback(() => {
         setIsActive(false);
         setMotionStatus('待机');
         window.removeEventListener('devicemotion', handleMotion);
-      };
+      }, [handleMotion]);
 
       // 处理按钮点击
       const handleButtonClick = async () => {
@@ -243,7 +253,7 @@
         return () => {
           window.removeEventListener('devicemotion', handleMotion);
         };
-      }, []);
+      }, [handleMotion]);
 
       return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6 flex flex-col items-center justify-center">
@@ -348,7 +358,7 @@
                     )}
                   </div>
                   
-                  {/* 计算结果 - 移除了 isActive 条件，改为检查 calculation 数据是否存在 */}
+                  {/* 计算结果 */}
                   {allSensorData.calculation ? (
                     <div className="border-l-2 border-orange-300 pl-2">
                       <div className="font-semibold text-orange-700">运动计算:</div>
@@ -385,6 +395,7 @@
               <div>• DeviceMotionEvent: {typeof DeviceMotionEvent !== 'undefined' ? '✓' : '✗'}</div>
               <div>• 权限API: {checkPermissionNeeded() ? '✓ (iOS)' : '✗ (Android/其他)'}</div>
               <div>• 当前权限: {permission}</div>
+              <div>• 当前检测状态: <span className="font-bold">{isActive ? '启用' : '关闭'}</span></div>
             </div>
 
             <div className="mt-6 bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
