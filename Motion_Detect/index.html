@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>MotionDetector 纯前端示例</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html, body, #root {
+      height: 100%;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React 与 ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Babel 用于实时转译 JSX & ES6 -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- 你的组件代码，注意去掉 import/export -->
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    function MotionDetector() {
+      const [isActive, setIsActive] = useState(false);
+      const [motionStatus, setMotionStatus] = useState('待机');
+      const [permission, setPermission] = useState('未知');
+      const [needsPermission, setNeedsPermission] = useState(false);
+      const lastAcceleration = useRef({ x: 0, y: 0, z: 0 });
+      const motionThreshold = 2;
+      const stillThreshold = 0.5;
+      const motionHistory = useRef([]);
+
+      // 检查是否需要权限请求
+      const checkPermissionNeeded = () => {
+        return typeof DeviceMotionEvent !== 'undefined' 
+          && typeof DeviceMotionEvent.requestPermission === 'function';
+      };
+
+      // 请求权限 - 必须在用户点击事件中直接调用
+      const requestPermission = async () => {
+        if (checkPermissionNeeded()) {
+          try {
+            console.log('正在请求权限...');
+            const state = await DeviceMotionEvent.requestPermission();
+            console.log('权限状态:', state);
+            setPermission(state === 'granted' ? '已授权' : '被拒绝');
+            return state === 'granted';
+          } catch (e) {
+            console.error('权限请求错误:', e);
+            setPermission('请求失败');
+            return false;
+          }
+        } else {
+          // Android 或其他不需要权限的设备
+          setPermission('已授权');
+          return true;
+        }
+      };
+
+      const calculateMotionIntensity = acc => {
+        if (!acc || acc.x == null) return 0;
+        const dx = Math.abs(acc.x - lastAcceleration.current.x);
+        const dy = Math.abs(acc.y - lastAcceleration.current.y);
+        const dz = Math.abs(acc.z - lastAcceleration.current.z);
+        lastAcceleration.current = { x: acc.x, y: acc.y, z: acc.z };
+        return Math.sqrt(dx*dx + dy*dy + dz*dz);
+      };
+
+      const handleMotion = e => {
+        if (!isActive) return;
+        const inten = calculateMotionIntensity(e.acceleration);
+        motionHistory.current.push(inten);
+        if (motionHistory.current.length > 10) {
+          motionHistory.current.shift();
+        }
+        const avg = motionHistory.current.reduce((a,b)=>a+b,0) / motionHistory.current.length;
+        if (avg > motionThreshold) setMotionStatus('Moving');
+        else if (avg < stillThreshold) setMotionStatus('Stop');
+      };
+
+      // 启动检测
+      const startDetection = () => {
+        setIsActive(true);
+        setMotionStatus('准备中...');
+        motionHistory.current = [];
+        window.addEventListener('devicemotion', handleMotion);
+        setTimeout(() => {
+          setMotionStatus('Stop');
+        }, 3000);
+      };
+
+      // 停止检测
+      const stopDetection = () => {
+        setIsActive(false);
+        setMotionStatus('待机');
+        window.removeEventListener('devicemotion', handleMotion);
+      };
+
+      // 处理按钮点击
+      const handleButtonClick = async () => {
+        if (isActive) {
+          // 当前正在检测，直接停止
+          stopDetection();
+          return;
+        }
+
+        // 准备启动检测
+        if (checkPermissionNeeded() && permission !== '已授权') {
+          // iOS设备且未获得权限，直接在点击事件中请求
+          const granted = await requestPermission();
+          if (granted) {
+            startDetection();
+          } else {
+            alert('需要授权访问设备运动传感器才能使用此功能');
+          }
+        } else {
+          // 已有权限或不需要权限，直接启动
+          startDetection();
+        }
+      };
+
+      // 初始化检查
+      useEffect(() => {
+        setNeedsPermission(checkPermissionNeeded());
+        if (!checkPermissionNeeded()) {
+          setPermission('已授权');
+        }
+
+        return () => {
+          window.removeEventListener('devicemotion', handleMotion);
+        };
+      }, []);
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6 flex flex-col items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+            <h1 className="text-2xl font-bold text-center text-gray-800 mb-8">运动检测器</h1>
+
+            <div className="bg-gray-50 rounded-xl p-6 mb-8 text-center">
+              <div className="text-sm text-gray-500 mb-2">当前状态</div>
+              <div className={`text-3xl font-bold ${
+                motionStatus === 'Moving' ? 'text-green-600' :
+                motionStatus === 'Stop' ? 'text-red-600' :
+                'text-gray-600'
+              }`}>
+                {motionStatus}
+              </div>
+              <div className="mt-4 flex justify-center">
+                <div className={`w-4 h-4 rounded-full ${
+                  isActive ?
+                    (motionStatus === 'Moving' ? 'bg-green-500 animate-pulse' :
+                     motionStatus === 'Stop'   ? 'bg-red-500' :
+                     'bg-yellow-500 animate-pulse')
+                  : 'bg-gray-300'
+                }`}></div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleButtonClick}
+              className={`w-full py-4 px-6 rounded-xl text-white font-semibold text-lg transition-all duration-200 ${
+                isActive ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'
+              } transform active:scale-95`}
+            >
+              {isActive ? '停止检测' : (
+                needsPermission && permission !== '已授权' ? '授权并开始检测' : '开始检测'
+              )}
+            </button>
+
+            {/* 权限状态显示 */}
+            <div className="mt-4 text-center text-sm">
+              <div className="text-gray-500">
+                设备类型: {needsPermission ? 'iOS (需要权限)' : 'Android/其他'}
+              </div>
+              {permission !== '未知' && (
+                <div className="text-gray-500">
+                  传感器权限：
+                  <span className={permission === '已授权' ? 'text-green-600' : 'text-red-600'}>
+                    {permission}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* 调试信息 */}
+            <div className="mt-4 bg-yellow-50 rounded-lg p-3 text-xs text-yellow-800">
+              <div>调试信息:</div>
+              <div>• DeviceMotionEvent: {typeof DeviceMotionEvent !== 'undefined' ? '✓' : '✗'}</div>
+              <div>• 权限API: {checkPermissionNeeded() ? '✓ (iOS)' : '✗ (Android/其他)'}</div>
+              <div>• 当前权限: {permission}</div>
+            </div>
+
+            <div className="mt-6 bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
+              <p><strong>使用说明:</strong></p>
+              <p>• iOS用户首次使用需要点击授权</p>
+              <p>• 行走时显示 "Moving"</p>
+              <p>• 静止时显示 "Stop"</p>
+              <p>• 如果权限被拒绝，请在Safari设置中重新允许</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root'))
+      .render(<MotionDetector />);
+  </script>
+</body>
+</html>
