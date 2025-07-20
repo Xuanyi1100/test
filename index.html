@@ -132,6 +132,7 @@
           
           // 计算运动强度
           const inten = calculateMotionIntensity(dataSource);
+          console.log(inten);
           motionHistory.current.push(inten);
           if (motionHistory.current.length > 15) {
             motionHistory.current.shift();
