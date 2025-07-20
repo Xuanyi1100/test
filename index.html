@@ -94,30 +94,6 @@
       const handleMotion = e => {
         setEventCount(prev => prev + 1);
         
-        // 尝试计算运动强度 - 先计算，后面会用到
-        let dataSource = e.acceleration;
-        let sourceName = 'acceleration';
-        let inten = 0;
-        let avg = 0;
-        
-        if (!dataSource || (dataSource.x === null && dataSource.y === null && dataSource.z === null)) {
-          dataSource = e.accelerationIncludingGravity;
-          sourceName = 'accelerationIncludingGravity';
-        }
-        
-        // 只有在 isActive 时才进行运动计算和状态更新
-        if (isActive) {
-          inten = calculateMotionIntensity(dataSource);
-          motionHistory.current.push(inten);
-          if (motionHistory.current.length > 15) {
-            motionHistory.current.shift();
-          }
-          avg = motionHistory.current.reduce((a,b)=>a+b,0) / motionHistory.current.length;
-          
-          if (avg > motionThreshold) setMotionStatus('Moving');
-          else if (avg < stillThreshold) setMotionStatus('Stop');
-        }
-        
         // 收集所有可能的数据 - 无论是否 active 都收集
         const sensorData = {
           timestamp: new Date().toISOString().split('T')[1].split('.')[0],
@@ -143,8 +119,26 @@
           } : null
         };
         
-        // 添加计算结果到传感器数据中（无论是否 active）
-        if (isActive && motionHistory.current.length > 0) {
+        // 只有在 isActive 时才进行运动计算和状态更新
+        if (isActive) {
+          // 尝试计算运动强度
+          let dataSource = e.acceleration;
+          let sourceName = 'acceleration';
+          
+          if (!dataSource || (dataSource.x === null && dataSource.y === null && dataSource.z === null)) {
+            dataSource = e.accelerationIncludingGravity;
+            sourceName = 'accelerationIncludingGravity';
+          }
+          
+          // 计算运动强度
+          const inten = calculateMotionIntensity(dataSource);
+          motionHistory.current.push(inten);
+          if (motionHistory.current.length > 15) {
+            motionHistory.current.shift();
+          }
+          const avg = motionHistory.current.reduce((a,b)=>a+b,0) / motionHistory.current.length;
+          
+          // 添加计算结果到传感器数据中
           sensorData.calculation = {
             dataSource: sourceName,
             intensity: inten,
@@ -155,6 +149,10 @@
             willBeMoving: avg > motionThreshold,
             willBeStop: avg < stillThreshold
           };
+          
+          // 更新运动状态
+          if (avg > motionThreshold) setMotionStatus('Moving');
+          else if (avg < stillThreshold) setMotionStatus('Stop');
         }
         
         setAllSensorData(sensorData);
