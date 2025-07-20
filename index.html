@@ -31,9 +31,10 @@
       const [motionStatus, setMotionStatus] = useState('待机');
       const [permission, setPermission] = useState('未知');
       const [needsPermission, setNeedsPermission] = useState(false);
+      const [debugInfo, setDebugInfo] = useState({});
       const lastAcceleration = useRef({ x: 0, y: 0, z: 0 });
-      const motionThreshold = 2;
-      const stillThreshold = 0.5;
+      const motionThreshold = 0.5; // 降低阈值
+      const stillThreshold = 0.1; // 降低阈值
       const motionHistory = useRef([]);
 
       // 检查是否需要权限请求
@@ -64,22 +65,74 @@
       };
 
       const calculateMotionIntensity = acc => {
-        if (!acc || acc.x == null) return 0;
-        const dx = Math.abs(acc.x - lastAcceleration.current.x);
-        const dy = Math.abs(acc.y - lastAcceleration.current.y);
-        const dz = Math.abs(acc.z - lastAcceleration.current.z);
-        lastAcceleration.current = { x: acc.x, y: acc.y, z: acc.z };
+        if (!acc || (acc.x == null && acc.y == null && acc.z == null)) return 0;
+        
+        // 如果是第一次，初始化参考值
+        if (lastAcceleration.current.x === 0 && lastAcceleration.current.y === 0 && lastAcceleration.current.z === 0) {
+          lastAcceleration.current = { 
+            x: acc.x || 0, 
+            y: acc.y || 0, 
+            z: acc.z || 0 
+          };
+          return 0;
+        }
+        
+        const dx = Math.abs((acc.x || 0) - lastAcceleration.current.x);
+        const dy = Math.abs((acc.y || 0) - lastAcceleration.current.y);
+        const dz = Math.abs((acc.z || 0) - lastAcceleration.current.z);
+        
+        lastAcceleration.current = { 
+          x: acc.x || 0, 
+          y: acc.y || 0, 
+          z: acc.z || 0 
+        };
+        
         return Math.sqrt(dx*dx + dy*dy + dz*dz);
       };
 
       const handleMotion = e => {
         if (!isActive) return;
-        const inten = calculateMotionIntensity(e.acceleration);
+        
+        // 获取所有可能的加速度数据
+        const acc = e.acceleration;
+        const accGrav = e.accelerationIncludingGravity;
+        const rotRate = e.rotationRate;
+        
+        // 尝试不同的数据源
+        let dataSource = acc;
+        let sourceName = 'acceleration';
+        
+        if (!acc || (acc.x === null && acc.y === null && acc.z === null)) {
+          dataSource = accGrav;
+          sourceName = 'accelerationIncludingGravity';
+        }
+        
+        const inten = calculateMotionIntensity(dataSource);
         motionHistory.current.push(inten);
-        if (motionHistory.current.length > 10) {
+        if (motionHistory.current.length > 15) { // 增加历史记录长度
           motionHistory.current.shift();
         }
         const avg = motionHistory.current.reduce((a,b)=>a+b,0) / motionHistory.current.length;
+        
+        // 更新调试信息
+        setDebugInfo({
+          dataSource: sourceName,
+          rawAcc: dataSource ? {
+            x: dataSource.x?.toFixed(3),
+            y: dataSource.y?.toFixed(3),
+            z: dataSource.z?.toFixed(3)
+          } : null,
+          intensity: inten.toFixed(3),
+          avgIntensity: avg.toFixed(3),
+          threshold: motionThreshold,
+          historyLength: motionHistory.current.length,
+          rotationRate: rotRate ? {
+            alpha: rotRate.alpha?.toFixed(2),
+            beta: rotRate.beta?.toFixed(2),
+            gamma: rotRate.gamma?.toFixed(2)
+          } : null
+        });
+        
         if (avg > motionThreshold) setMotionStatus('Moving');
         else if (avg < stillThreshold) setMotionStatus('Stop');
       };
@@ -189,11 +242,27 @@
             </div>
 
             {/* 调试信息 */}
+            {isActive && debugInfo.rawAcc && (
+              <div className="mt-4 bg-green-50 rounded-lg p-3 text-xs text-green-800 font-mono">
+                <div className="font-bold mb-2">实时传感器数据:</div>
+                <div>数据源: {debugInfo.dataSource}</div>
+                <div>原始加速度: x={debugInfo.rawAcc.x}, y={debugInfo.rawAcc.y}, z={debugInfo.rawAcc.z}</div>
+                <div>运动强度: {debugInfo.intensity}</div>
+                <div>平均强度: {debugInfo.avgIntensity} (阈值: {debugInfo.threshold})</div>
+                <div>历史记录: {debugInfo.historyLength}条</div>
+                {debugInfo.rotationRate && (
+                  <div>旋转率: α={debugInfo.rotationRate.alpha}°, β={debugInfo.rotationRate.beta}°, γ={debugInfo.rotationRate.gamma}°</div>
+                )}
+              </div>
+            )}
+
             <div className="mt-4 bg-yellow-50 rounded-lg p-3 text-xs text-yellow-800">
               <div>调试信息:</div>
               <div>• DeviceMotionEvent: {typeof DeviceMotionEvent !== 'undefined' ? '✓' : '✗'}</div>
               <div>• 权限API: {checkPermissionNeeded() ? '✓ (iOS)' : '✗ (Android/其他)'}</div>
               <div>• 当前权限: {permission}</div>
+              <div>• 运动阈值: {motionThreshold} (已降低)</div>
+              <div>• 静止阈值: {stillThreshold}</div>
             </div>
 
             <div className="mt-6 bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
