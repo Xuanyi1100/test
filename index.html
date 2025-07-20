@@ -16,6 +16,10 @@
 <body>
   <div id="root"></div>
 
+  <!-- 添加调试工具 -->
+  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+  <script>eruda.init();</script>
+
   <!-- React 与 ReactDOM -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -66,7 +70,12 @@
       };
 
       const calculateMotionIntensity = acc => {
-        if (!acc || (acc.x == null && acc.y == null && acc.z == null)) return 0;
+        console.log('calculateMotionIntensity called with:', acc);
+        
+        if (!acc || (acc.x == null && acc.y == null && acc.z == null)) {
+          console.log('No valid acceleration data');
+          return 0;
+        }
         
         // 如果是第一次，初始化参考值
         if (lastAcceleration.current.x === 0 && lastAcceleration.current.y === 0 && lastAcceleration.current.z === 0) {
@@ -75,6 +84,7 @@
             y: acc.y || 0, 
             z: acc.z || 0 
           };
+          console.log('First time, initialized reference:', lastAcceleration.current);
           return 0;
         }
         
@@ -82,16 +92,22 @@
         const dy = Math.abs((acc.y || 0) - lastAcceleration.current.y);
         const dz = Math.abs((acc.z || 0) - lastAcceleration.current.z);
         
+        console.log('Delta values:', { dx, dy, dz });
+        
         lastAcceleration.current = { 
           x: acc.x || 0, 
           y: acc.y || 0, 
           z: acc.z || 0 
         };
         
-        return Math.sqrt(dx*dx + dy*dy + dz*dz);
+        const intensity = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        console.log('Calculated intensity:', intensity);
+        
+        return intensity;
       };
 
       const handleMotion = e => {
+        console.log('handleMotion called, isActive:', isActive);
         setEventCount(prev => prev + 1);
         
         // 收集所有可能的数据 - 无论是否 active 都收集
@@ -119,25 +135,37 @@
           } : null
         };
         
+        console.log('Sensor data collected:', sensorData);
+        
         // 只有在 isActive 时才进行运动计算和状态更新
         if (isActive) {
+          console.log('Starting motion calculation...');
+          
           // 尝试计算运动强度
           let dataSource = e.acceleration;
           let sourceName = 'acceleration';
           
+          console.log('Initial dataSource (acceleration):', dataSource);
+          
           if (!dataSource || (dataSource.x === null && dataSource.y === null && dataSource.z === null)) {
             dataSource = e.accelerationIncludingGravity;
             sourceName = 'accelerationIncludingGravity';
+            console.log('Switched to accelerationIncludingGravity:', dataSource);
           }
           
           // 计算运动强度
+          console.log('About to calculate intensity with dataSource:', dataSource);
           const inten = calculateMotionIntensity(dataSource);
-          console.log(inten);
+          console.log('Calculated intensity result:', inten);
+          
           motionHistory.current.push(inten);
           if (motionHistory.current.length > 15) {
             motionHistory.current.shift();
           }
           const avg = motionHistory.current.reduce((a,b)=>a+b,0) / motionHistory.current.length;
+          
+          console.log('Motion history length:', motionHistory.current.length);
+          console.log('Average intensity:', avg);
           
           // 添加计算结果到传感器数据中
           sensorData.calculation = {
@@ -150,6 +178,8 @@
             willBeMoving: avg > motionThreshold,
             willBeStop: avg < stillThreshold
           };
+          
+          console.log('Added calculation to sensorData:', sensorData.calculation);
           
           // 更新运动状态
           if (avg > motionThreshold) setMotionStatus('Moving');
@@ -372,7 +402,5 @@
     ReactDOM.createRoot(document.getElementById('root'))
       .render(<MotionDetector />);
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>eruda.init();</script>
 </body>
 </html>
